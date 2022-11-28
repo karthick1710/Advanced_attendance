@@ -1,0 +1,260 @@
+This is a MFRC522 library example; for further details and other examples see: https://github.com/miguelbalboa/rfid
+
+   Example sketch/program showing how to the read data from a PICC (that is: a RFID Tag or Card) using a MFRC522 based RFID
+   Reader on the Arduino SPI interface.
+
+   When the Arduino and the MFRC522 module are connected (see the pin layout below), load this sketch into Arduino IDE
+   then verify/compile and upload it. To see the output: use Tools, Serial Monitor of the IDE (hit Ctrl+Shft+M). When
+   you present a PICC (that is: a RFID Tag or Card) at reading distance of the MFRC522 Reader/PCD, the serial output
+   will show the type, and the NUID if a new card has been detected. Note: you may see "Timeout in communication" messages
+   when removing the PICC from reading distance too early.
+
+   @license Released into the public domain.
+
+  The circuit for LCD SCREEN:
+  pin3 to grd with 220 ohm resister
+   LCD RS pin to digital pin A0
+   LCD Enable pin to digital pin A1
+   LCD D4 pin to digital pin 5
+   LCD D5 pin to digital pin 4
+   LCD D6 pin to digital pin 3
+   LCD D7 pin to digital pin 2
+   LCD R/W pin to ground
+   LCD VSS pin to ground
+   LCD VCC pin to 5V
+   10K resistor:
+   ends to +5V and ground
+   wiper to LCD VO pin (pin 3)
+
+   RFID Circuit :
+   Typical pin layout used:
+   -----------------------------------------------------------------------------------------
+               MFRC522      Arduino       Arduino   Arduino    Arduino          Arduino
+               Reader/PCD   Uno/101       Mega      Nano v3    Leonardo/Micro   Pro Micro
+   Signal      Pin          Pin           Pin       Pin        Pin              Pin
+   -----------------------------------------------------------------------------------------
+   RST/Reset   RST          9             5         D9         RESET/ICSP-5     RST
+   SPI SS      SDA(SS)      10            53        D10        10               10
+   SPI MOSI    MOSI         11 / ICSP-4   51        D11        ICSP-4           16
+   SPI MISO    MISO         12 / ICSP-1   50        D12        ICSP-1           14
+   SPI SCK     SCK          13 / ICSP-3   52        D13        ICSP-3           15
+*/
+
+#include <SPI.h>
+#include <MFRC522.h>
+// include the library code:
+#include <LiquidCrystal.h>
+
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+const int rs = A0, en = A1, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+#define SS_PIN 10
+#define RST_PIN 9
+int writeVal;
+int greenLedPin = A2;
+int redLedPin = A3;
+int orangeLedPin = 6;
+int buzzerPin = A4;
+
+boolean chkConn = false;
+MFRC522 rfid(SS_PIN, RST_PIN); // Instance of the class
+
+MFRC522::MIFARE_Key key;
+
+// Init array that will store new NUID
+byte nuidPICC[4];
+  boolean isValidating = false;
+void setup() {
+  Serial.begin(9600);
+
+  SPI.begin(); // Init SPI bus
+  rfid.PCD_Init(); // Init MFRC522
+  pinMode(greenLedPin, OUTPUT);
+  pinMode(redLedPin, OUTPUT);
+  digitalWrite(buzzerPin, OUTPUT);
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0);
+
+//  lcd.print("Welcome To GadgetProgrammer");
+//  for (int i = 0; i < 26; i++) {
+//    lcd.scrollDisplayRight();
+//    delay(100);
+//  }
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0);
+  lcd.print("GadgetProgrammer");
+  delay(100);
+
+  lcd.setCursor(0, 1);
+  lcd.print(" Not Connected! ");
+  establishConnection();
+}
+
+void loop() {
+
+  lcd.setCursor(0, 1);
+
+  char retOutput;
+  if (Serial.available() > 0) {
+    retOutput = Serial.read();
+   
+    lcd.blink();
+    if (retOutput == 'A') {
+      chkConn = true;
+      analogWrite(orangeLedPin,0);
+      lcd.print("Swipe Your Card!");
+    }
+    if(retOutput == 'V'){
+      analogWrite(orangeLedPin,1000);
+      lcd.print("Validating Group");
+      isValidating = true;
+      delay(1000);
+    }
+    
+    if(retOutput == 'S'){
+      lcd.print("Validation Done!");
+      glowGreenLed(1000);
+      isValidating = false;
+      delay(1000);
+      }
+  
+  }
+  if (chkConn && !retOutput != "") {
+    if (retOutput == '1') {
+      lcd.print("Attendance Done!");
+      glowGreenLed(1000);
+      delay(4000);
+    }
+    else if (retOutput == '0') {
+      lcd.print("Network Error  !");
+      glowRedLed(1000);
+      delay(4000);
+    } else if (retOutput == '2') {
+      lcd.print("User Not Found!");
+      glowRedLed(1000);
+      delay(4000);
+    } else if (retOutput == '5') {
+      lcd.print("Network Error!");
+      glowRedLed(1000);
+      delay(4000);
+    }
+    //if not in validation process then swipe your card
+    if(isValidating == false){
+      lcd.setCursor(0, 1);
+      analogWrite(orangeLedPin,0);
+      lcd.print("Swipe Your Card!");
+    }
+    //lcd.clear();
+    // Look for new cards
+  }
+  if ( ! rfid.PICC_IsNewCardPresent())
+    return;
+
+  // Verify if the NUID has been readed
+  if ( ! rfid.PICC_ReadCardSerial())
+    return;
+
+  //Serial.print(F("PICC type: "));
+  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+  //Serial.println(rfid.PICC_GetTypeName(piccType));//Printing type of card
+
+  // Check is the PICC of Classic MIFARE type
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&
+      piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
+      piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
+    //Serial.println(F("Your tag is not of type MIFARE Classic."));
+    return;
+  }
+  String s;
+  for (byte i = 0; i < 4; i++) {
+
+    nuidPICC[i] = rfid.uid.uidByte[i];
+
+  }
+
+  //Serial.println(F("The NUID tag is:"));
+  //Serial.print(F("In hex: "));
+  printHex(rfid.uid.uidByte, rfid.uid.size);
+  Serial.println();
+  lcd.setCursor(0,1);
+  lcd.print("Reading Card...!");
+  // Halt PICC
+  rfid.PICC_HaltA();
+
+  // Stop encryption on PCD
+  rfid.PCD_StopCrypto1();
+  delay(1000);
+}
+
+
+/**
+   Helper routine to dump a byte array as hex values to Serial.
+*/
+void printHex(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? "0" : "");
+    Serial.print(buffer[i], HEX);
+  }
+}
+
+/**
+   Helper routine to dump a byte array as dec values to Serial.
+*/
+void printDec(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? "0" : "");
+    Serial.print(buffer[i], DEC);
+  }
+
+
+
+}
+void glowGreenLed(int delaytime) {
+  digitalWrite(orangeLedPin,LOW);
+  digitalWrite(greenLedPin, HIGH);
+  digitalWrite(redLedPin, LOW);
+  tone(buzzerPin, 5000, 300);
+  if (delaytime > 0) {
+    delay(delaytime);
+    digitalWrite(greenLedPin, LOW);
+    noTone(buzzerPin);
+  }
+}
+void glowRedLed(int delaytime) {
+  digitalWrite(orangeLedPin,LOW);
+  digitalWrite(greenLedPin, LOW);
+  digitalWrite(redLedPin, HIGH);
+  digitalWrite(buzzerPin, HIGH);
+  delay(1000);
+  tone(buzzerPin, 5000);
+  //noTone(buzzerPin);
+  if (delaytime > 0) {
+    delay(delaytime);
+    digitalWrite(redLedPin, LOW);
+    noTone(buzzerPin);
+  }
+}
+void glowOrangeLed(){
+  analogWrite(orangeLedPin,100);
+  delay(100);
+  }
+//contacting with processing sending A to Serial Port
+void establishConnection() {
+  while (Serial.available() <= 0 && !chkConn) {
+    Serial.println("A");
+    glowOrangeLed();
+    delay(200);
+  }
+}
+void printLcdMsg(String msg, int col, int row) {
+  if (msg.equals("") || row < 0 || col < 0) {
+    row = 0;
+    col = 1;
+  }
+  lcd.setCursor(col, row);
+  lcd.print(msg);
+}
